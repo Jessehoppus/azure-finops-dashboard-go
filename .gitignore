@@ -1,0 +1,12 @@
+# binaries
+bin/
+*.exe
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# envs
+.env
+.env.local
