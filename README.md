@@ -1,70 +1,134 @@
 # 🌤️ Azure FinOps Dashboard (Go)
 
-Ferramenta CLI para análise FinOps em ambientes **Microsoft Azure**, baseada nas APIs do **Cost Management**.
+CLI para análise **FinOps** em **Microsoft Azure** usando **Cost Management Query API** e inventário de **Compute**.
 
-Inspirado no projeto original [aws-finops-dashboard-go](https://github.com/Jessehoppus/aws-finops-dashboard-go).
+Inspirado em [aws-finops-dashboard-go](https://github.com/Jessehoppus/aws-finops-dashboard-go).
 
 ---
 
 ## ⚙️ Requisitos
 
 - Go 1.22+
-- Permissão **Cost Management Reader** na subscription/RG desejado.
-- App Registration no Entra ID (Client ID, Secret, Tenant ID).
-- Variáveis de ambiente configuradas (veja abaixo).
+- App Registration / Service Principal com **Client ID / Secret** ou `az login`
+- **RBAC** na subscription:
+  - Para custos: **Cost Management Reader**
+  - Para auditorias (Compute): **Reader** na subscription
+- Variáveis de ambiente (se usar SP):
+  ```powershell
+  $env:AZURE_TENANT_ID       = "<TENANT_ID>"
+  $env:AZURE_CLIENT_ID       = "<CLIENT_ID>"
+  $env:AZURE_CLIENT_SECRET   = "<CLIENT_SECRET>"
+  $env:AZURE_SUBSCRIPTION_ID = "<SUBSCRIPTION_ID>"
+  ```
 
-> Dica: Use o script `scripts/setup-appregistration.ps1` para criar automaticamente o App Registration, definir o papel **Cost Management Reader** e devolver os comandos de ambiente.
+> Dica: carregue com `.\env.ps1` (incluso no repo).
+
+---
+
+## 🚀 Build rápido
 
 ```powershell
-# Exemplo de variáveis no PowerShell
-$env:AZURE_CLIENT_ID="xxxx-..."
-$env:AZURE_TENANT_ID="xxxx-..."
-$env:AZURE_CLIENT_SECRET="xxxx-..."
-$env:AZURE_SUBSCRIPTION_ID="xxxx-..."
+.\build.ps1
+# binário em .\bin\azure-finops.exe
+```
+
+Build manual:
+```powershell
+go mod tidy
+go build -o .\bin\azure-finops.exe .\cmd\azure-finops
 ```
 
 ---
 
-## 🚀 Build e Execução
+## 🧭 Uso
 
-```bash
-make build
-./bin/azure-finops trend \
-  --scope "/subscriptions/$AZURE_SUBSCRIPTION_ID" \
-  --from 2025-09-24 \
-  --to 2025-10-24 \
-  --dimension ServiceName \
+O binário aceita um **modo** inicial (`trend`, `details`, `audit`) ou pode ser chamado direto (equivalente a `trend`).
+
+### 1) Tendência (trend)
+Agrupa custos por dimensão com granularidade opcional (None/Daily/Monthly).
+
+```powershell
+.\bin\azure-finops.exe trend `
+  --scope "/subscriptions/$($env:AZURE_SUBSCRIPTION_ID)" `
+  --from 2025-09-01 --to 2025-10-24 `
+  --dimension ServiceName `
   --granularity Monthly
 ```
 
-Saída (exemplo):
+Exportar CSV/JSON + gerar gráfico HTML:
+```powershell
+.\bin\azure-finops.exe trend `
+  --scope "/subscriptions/$($env:AZURE_SUBSCRIPTION_ID)" `
+  --from 2025-09-01 --to 2025-10-24 `
+  --dimension ServiceName `
+  --granularity Monthly `
+  --export csv `
+  --out .\reports `
+  --chart .\reports\trend.html
+```
 
+Dimensões comuns: `ServiceName`, `MeterCategory`, `ResourceGroup`, `TagKey:<chave>` (ex.: `TagKey:Environment`).
+
+### 2) Detalhes (amortizado vs. real)
+Resumo por `PricingModel` + `ChargeType` (granularidade Monthly).
+
+```powershell
+.\bin\azure-finops.exe details `
+  --scope "/subscriptions/$($env:AZURE_SUBSCRIPTION_ID)" `
+  --from 2025-09-01 --to 2025-10-24 `
+  --export json `
+  --out .\reports
 ```
-Período: 2025-09-24 .. 2025-10-24 | Escopo: /subscriptions/xxxx
-ServiceName                         totalCost
-Virtual Machines                     1245.87
-Storage                              512.34
-...
+
+### 3) Auditorias (Compute)
+- **Discos órfãos** (managed disks sem VM associada)
+- **VMs paradas/deallocated** com **discos Premium**
+
+```powershell
+.\bin\azure-finops.exe audit `
+  --scope "/subscriptions/$($env:AZURE_SUBSCRIPTION_ID)" `
+  --export csv `
+  --out .\reports
 ```
+
+Saídas:
+- `.\reports\audit_orphaned_disks.csv|json`
+- `.\reports\audit_stopped_vms_premium.csv|json`
+
+> Dê ao SP/usuário **Reader** na subscription para listar Compute.
 
 ---
 
 ## 🧱 Estrutura
 
 ```
-cmd/azure-finops/       → CLI
-internal/core/           → Portas / interfaces
-internal/adapters/azure/ → SDK Azure Cost Management
-pkg/version/             → Metadados
-scripts/                 → Automação (App Registration)
-.github/workflows/       → CI (GitHub Actions)
+cmd/azure-finops/       → CLI (modes: trend, details, audit)
+internal/adapters/azure/
+  ├── costquery/        → Cost Management Query API
+  └── inventory/        → Compute (VMs, Disks) p/ auditorias
+internal/report/        → CSV, JSON e HTML (gráfico)
+env.ps1                 → carrega AZURE_* na sessão
+build.ps1               → build simplificado
 ```
 
 ---
 
-## 🧩 Próximos passos
+## 🔐 App Registration (opcional)
+Crie com Azure CLI (ou use `az login` para testar via **AzureCLICredential**). Dê ao app **Cost Management Reader** na subscription e **Reader** para auditorias de Compute.
 
-- Módulo `costdetails` para Savings Plans/Reservations (amortizado vs real)
-- Exportação CSV/JSON
-- Auditoria de recursos (VMs ociosas, discos órfãos)
-- Painel gráfico (Dash/Grafana)
+> Se quiser automatizar, posso incluir um script que crie o App, gere o secret e aplique RBAC.
+
+---
+
+## 🧪 CI (GitHub Actions)
+- `ci.yml`: build e testes a cada push/PR
+- `release.yml`: cria **release** com binários para Windows e Linux
+
+Para publicar um release:
+1. Faça um tag `git tag v0.2.0 && git push origin v0.2.0`
+2. O workflow gera artefatos e anexa no release automaticamente.
+
+---
+
+## 📜 Licença
+MIT (ou a que você preferir).

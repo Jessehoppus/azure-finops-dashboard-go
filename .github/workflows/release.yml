@@ -1,0 +1,39 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Build (linux amd64)
+        run: |
+          mkdir -p dist
+          GOOS=linux GOARCH=amd64 go build -o dist/azure-finops_linux_amd64 ./cmd/azure-finops
+
+      - name: Build (windows amd64)
+        run: |
+          GOOS=windows GOARCH=amd64 go build -o dist/azure-finops_windows_amd64.exe ./cmd/azure-finops
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/azure-finops_linux_amd64
+            dist/azure-finops_windows_amd64.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
